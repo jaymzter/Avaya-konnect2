@@ -12,7 +12,7 @@ Konnect2 is meant to be a more or less drop in replacement for connect2, but wri
 5. There is a primitive formatting facility, but because the OSSI doesn't have a sset output format, your command results should best be massaged by an external program.
 
 Once connected, the following internal commands are available:
-
+```
 ~~ to send a ~
 
 ~h internal help message
@@ -26,3 +26,9 @@ Once connected, the following internal commands are available:
 ~q to quit
 
 ~x to run a local shell
+```
+
+## Files in this repository
+* konnect2 - the main program
+* ossi.sc  - a folder containing sample ossi scripts
+* ossifmt  - a pretty formatter for the files konnect2 creates when running ossi scripts
