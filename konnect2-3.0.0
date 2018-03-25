@@ -1,0 +1,550 @@
+```
+#!/usr/bin/expect --
+
+############################################################################## 
+#
+# Name		: konnect2
+# Purpose	: lightweight connect2 emulator
+# Notes		: by me, Jamie Sims
+# Changelog	: v3.0.0
+#
+# 07/13/2016	: * automagically run a single ossi script without having to
+# 		    manually log into PBX (batch_session)
+#		  * made ssh login more generic to accomodate batch_session
+#		  * cleaned up argument checking
+#		  * Specify if in lab env so we can decide when to use static
+#		    passwords
+# 02/04/2016	: fmt deprecated, use external ossifmt cmd instead
+# 04/22/2014	: convert format proc to tcl
+# 10/17/2013	: added ASG chall support
+# 08/02/2013	: removed requirement for separate formatting script (proc
+# 		  fmt), bump rev
+# 07/31/2013	: sort listing of ossi scripts as displayed to user
+# 07/24/2013	: mostly re-written, resulting in significant speed
+# 		  improvements, 0m1.146s vs. 0m6.975s
+# 09/23/2010	: ported to Citi environment
+# 03/04/2008	: baselined re-write of Avaya connect2 functionality
+#
+# TODO		: Make the following procs
+#		    * script open/send
+#		    * ssh connection
+#		 Fix: go into sat, logoff, run ~x, exit bug
+#		      cannot run ossi using init_session
+############################################################################## 
+
+#----------------------------------------------------------------------------- 
+# procs
+#----------------------------------------------------------------------------- 
+
+############################################################################
+#
+#  Name    : syntax
+#  Purpose : validate enough parameters to get started
+#  Notes   : 
+#
+############################################################################
+proc syntax {} {
+	global argc argv0
+
+	if { $argc < 2 } {
+		disperr $argv0
+	}
+}
+
+############################################################################
+#
+#  Name    : disperr
+#  Purpose : display error msg
+#  Notes   : 
+#
+############################################################################
+proc disperr {name} {
+	send_error "ERROR: Not enough parameters
+USAGE: 
+$name \<username\> \<hostname\> \[-s\]
+or
+$name \[-f\] \[raw\|sep separator\] \<filename\>
+or
+$name script \<username\> \<hostname\> ossi_script \[port\]
+
+username - username to connect with
+hostname - remote host fqdn or IP addr
+-f \[format\] \<filename\> - formats output from a previously run ossi script
+where format is raw or a user-defined separator, such as \"\,\" for CSV output
+-s - for use when connecting directly to SAT of Avaya CM
+script - directly run an ossi script on \<hostname\>. Defaults to port 5022 or
+optionally specify another \(like 22\), and $name will login to CLI then go to
+SAT
+
+Once connected, the following internal commands are available:
+
+~~ to send a ~
+~h internal help message
+~o run an OSSI script \(ONLY for use in Avaya SAT\)
+~r enable writing logfile on localhost
+~s disable logfile
+~q to quit
+~x to run a local shell
+"
+	exit
+}
+
+############################################################################
+#
+#  Name    : interact_help
+#  Purpose : display help msg for interact session
+#  Notes   : statements sent via send_user will make it into the logfile,
+#  	     whereas statements sent with puts do not
+#
+############################################################################
+proc interact_help {} {
+global argv0
+        puts "\n$argv0: You may use ~ followed by:
+        ~ to send a ~
+        h this message
+	o run an OSSI script \(ONLY for use in Avaya SAT\)
+        r enable writing logfile on localhost
+        s disable logfile
+        q to quit
+        x to run a local shell"
+        send "\n"
+}
+
+############################################################################
+#
+#  Name    : lab_auth
+#  Purpose : special checks for lab environment
+#  Notes   : 
+#
+############################################################################
+proc lab_auth {} {
+	
+	global login
+	set timeout -1
+	set list {admin craft labadmin local master root js34528}
+
+	if { [lsearch $list $login] != -1 } {
+		if {$login == "admin"} {
+			set pass admin
+			return "$pass\r"
+		} elseif { $login == "craft"} {
+			set pass craft01
+			return "$pass\r"
+		} elseif { $login == "root"} {
+			set pass root01
+			return "$pass\r"
+		} elseif { $login == "js34528"} {
+			set pass p4ssw0rD
+			return "$pass\r"
+		} else { 
+			set pass Labadmin01 
+			return "$pass\r"
+			} 
+	} else {
+		user_auth
+		}
+}
+
+############################################################################
+#
+#  Name    : user_auth
+#  Purpose : collect password
+#  Notes   : 
+############################################################################
+proc user_auth {} {
+	set pass ""
+	set timeout -1
+
+	send_user "\nPlease enter your password: "
+	stty -echo
+	expect_user -re ".*\n"
+	set pass $expect_out(0,string)
+
+	set timeout 20
+	send_user "\n"
+
+	return $pass
+}
+
+############################################################################
+#
+#  Name    : w2ktt_scrn
+#  Purpose : redraw terminal
+#  Notes   : 
+#  SAT term is a real cluster. There are two options, manually
+#  rebuild the screen when necessary using 'puts', or run a 'newterm' which the
+#  user will probably never catch. 
+#
+############################################################################
+proc w2ktt_scrn {session_id} {
+	set spawn_id $session_id
+	stty -echo
+	send -- "newterm\r"
+	expect -re "\] "
+	send -- "w2ktt\r"
+}
+############################################################################
+#
+#  Name    : ossi
+#  Purpose : execute ossi scripts in SAT 
+#  Notes   : sat operates in raw mode
+#	     updated reading/pushing of script info
+#
+############################################################################
+proc ossi {session_id} {
+set spawn_id $session_id
+set timeout 20
+set home $::env(HOME)
+set scriptdir $home/ossi.sc
+set clearscrn "\033c\033\[1\;1H\033\[0J\n" 
+send_user "Script name or leave blank for list: "
+stty -raw echo
+expect_user -re "(.*)\n"
+set script [string trimleft $expect_out(1,string)]
+stty raw
+
+if { $script == "" } {
+	send_user "\nusage: ossi scriptname\n
+available scripts:\n"
+
+	set contents [lsort [glob -directory $scriptdir *.sc]]
+		foreach item $contents {
+			append out $item
+			append out "\n"
+		}
+	# clear screen to defaults b/c SAT is pants
+	puts $clearscrn
+	send_user $out
+	send_user "\nPress Enter to continue.\n"
+	expect_user -re "(.*)\r"
+	w2ktt_scrn $spawn_id
+	return	
+}
+
+set runcmd "$scriptdir/$script"
+set logfilename $home/$script-[exec date +%F-%H-%M-%S]
+
+if  ![file exists $runcmd] {
+	puts $clearscrn
+	send_user "Sorry: Script not found or doesn't exist"
+	send_user "Script was $script"
+	send_user "\nPress Enter to continue.\n"
+	expect_user -re "(.*)\r"
+	w2ktt_scrn $spawn_id
+	return
+	}
+
+send -- "newterm\r"
+expect -exact "\]"
+send -- "ossi\r"
+expect -exact "t"
+log_file -a -noappend $logfilename
+
+set file [open $runcmd "r"]
+while {[ gets $file line ] != -1} {
+	send -- "$line\r"
+	}
+close $file
+
+expect -exact "t"
+send -- "cnewterm\rt\r"
+expect -re "\] "
+log_file
+stty -echo
+send -- "w2ktt\r"
+}
+
+############################################################################
+#
+#  Name    : fmt
+#  Purpose : format output of ossi files
+#  Notes   : currently formats to tab delineated
+#  TODO	   : allow user to choose separator, such as "," or ":"
+#
+############################################################################
+proc fmt {} {
+	global argv argc
+	set expr {^(d.*)}
+
+	if {$argc == 4} {
+		set sep [lindex $argv 2]
+		set file [lindex $argv 3]
+	} elseif {$argc == 3} {
+			set file [lindex $argv 2]
+		}
+
+	set fp [open $file r ]
+	set file_data [read $fp]
+	set data [split $file_data "\n"]
+		foreach item $data {
+			if { [regexp $expr $item match0] } {
+				regsub {^[d,f]} $match0 "" match1
+				if { [info exists sep] } {
+				regsub -all {[\s\t]} $match1 $sep match2
+				puts $match2
+			} else {
+				puts $match1
+				}
+			}
+		}
+}
+
+############################################################################
+#
+#  Name    : batch_session
+#  Purpose : execute one off batch cmds from prompt
+#  Notes   : 
+#  TODO	   : specify port 5022 or 22
+#
+############################################################################
+proc batch_session {} {
+	global argv prompt login host port
+	set file [lindex $argv 3]
+
+	if  ![file exists $file] {
+		send_user "Sorry: Script not found or doesn't exist\n"
+		exit 1
+		}
+
+ 	set fp [open $file r ]
+	set file_data [read $fp]
+	set logfilename script-[exec date +%F-%H-%M-%S].txt
+
+	set timeout -1
+#	log_user 0
+	set session_id [init_session $login $host $port]
+	set spawn_id $session_id
+	expect {
+		-re "terminal type" {
+			send -- "vt100\r"
+			exp_continue
+			}
+		-re $login {
+			send -- "autosat\r"
+			exp_continue
+			}
+		-re "513\] " {
+			send -- "ossi\r"
+			log_file -a -noappend $logfilename
+			exp_continue
+			}
+		-re "ossi" {
+			send -- "$file_data\r"
+			}
+		}
+
+	expect -exact "t"
+	send -- "clogoff\rt\r"
+	expect {
+		-re "n\]" {
+			send -- "y\r"
+			}
+		-re "$prompt" {
+			send -- "exit\r"
+			}
+		}
+	log_file
+	send_user "\nSee $logfilename for results\!\n"
+}
+
+############################################################################
+#
+#  Name    : init_session
+#  Purpose : primary access proc
+#  Notes   : logs the user into the remote system
+# Let ssh supply the error msgs.  if for some reason there's a need to proxy
+# the msg, then do something like this:
+# set err $expect_out(buffer)
+# send_error "$err ([lindex [split $remote '@'] 1])\n
+#
+############################################################################
+proc init_session {login host port} {
+global prompt ::pass
+set remote [format "%s@%s" "$login" "$host"]
+match_max 100000
+spawn -noecho ssh -o StrictHostKeyChecking=no -p $port $remote
+set session_id $spawn_id
+set timeout 20
+
+	expect {
+		eof {
+			send_error "Connection was unexpectedly closed\n"
+			exit
+		}
+		timeout {
+			send_error "Connection timed out\n"
+			exit
+		}
+		-re "assword: " {
+			if {$::pass == ""} {
+				set password [user_auth]
+				}
+			send -- "$::pass"
+			return $session_id
+				}
+		-re "Response: " {
+			set password [user_auth]
+			send -- "$::pass\r"
+				expect {
+					-re "assword: " {
+						send_error "automagic authentication failed, wrong password\n"
+						exit 10
+						}
+					-re "513\] " {
+						send -- "w2ktt\r"
+						return $session_id
+						}
+					-re $prompt {
+						return $session_id
+						}
+					-glob "Connection to * closed." {
+						send_error "Connection to $host has spontaneously closed.\n"
+						exit 9
+						}
+					-glob "*denied*" {
+						send_error "Password not accepted.\n"
+						return 10
+						}
+					}
+				}
+		}
+}
+
+############################################################################
+#
+#  Name    : main_session
+#  Purpose : main execution loop
+#  Notes   : 
+#  TODO	   : run ~r, run ~o and just hit return. Run ~o again. >crash!<
+#	     b/c we enable log_file twice, which is a no-no
+#
+############################################################################
+proc main_session {} {
+	global login host port prompt
+	set suspend 0
+
+	if { $port == 5022 } {
+		set is_sat 1
+		} else {
+			set is_sat ""
+			}
+	set ssh [init_session $login $host $port]
+        set spawn_id $ssh
+
+	expect {
+		-re $prompt {
+			send -- "vt100\r"
+			}
+		-re "513\] " {
+			send -- "w2ktt\r"
+			}
+		}
+
+	interact {
+		-re "~~" {
+			send "~"
+			}
+		"~h" {
+			interact_help
+			}
+		"~x" {
+			spawn -noecho $::env(SHELL)
+			interact 
+			if { $is_sat == 1 } {
+				w2ktt_scrn $ssh
+				}
+			}
+		"~q" {
+			set suspend 1
+			return
+			}
+		"~r" {
+			set logn konnect-[exec date +%F-%H-%M-%S].log
+			send_user "\nWriting to logfile $logn"
+			send "\n"
+			log_file $logn
+			}
+		"~s" {
+			log_file
+			send_user "\nFinished logging"
+			send "\n"
+			}
+		"~o" {
+			ossi $ssh
+			}
+		-echo "w2ktt" {
+				send "w2ktt\r"
+				set is_sat 1
+			}
+		}
+
+	if {$suspend > 0} {
+		puts "\nreturned from interact via \"return\""
+	} else {
+		puts "\ndisconnected from $host"
+	}
+
+}
+
+############################################################################
+#
+#  Name    : labchk
+#  Purpose : set auth based on whether we're using static passwords or not
+#  Notes   : 
+#  TODO	   : 
+#
+############################################################################
+proc labchk {} {
+global lab
+                if {$lab == 0} {
+                set ::pass [lab_auth]
+                        } else {
+                set ::pass [user_auth]
+                        }
+}
+
+#----------------------------------------------------------------------------- 
+# main
+#----------------------------------------------------------------------------- 
+# set your environment
+set lab 0
+set prompt "(%|#|>|\=\>|\\\$)"
+
+syntax
+switch -regexp -- $argv {
+	script {
+		set login [lindex $argv 1]
+		set host [lindex $argv 2]
+		labchk
+		if {$argc == 5} {
+			set port [lindex $argv 4]
+			} else {
+			set port 5022
+			}
+		batch_session
+		exit
+	}
+	sep {
+		fmt
+		exit
+	}
+	raw {
+		fmt
+		exit
+	}
+	\-s {
+		set login [lindex $argv 0]
+		set host [lindex $argv 1]
+		set port 5022
+		labchk
+		main_session
+	} default {
+		set login [lindex $argv 0]
+		set host [lindex $argv 1]
+		labchk
+		set port 22
+		main_session
+	}
+}
+#EOF
+```
