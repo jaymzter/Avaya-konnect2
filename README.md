@@ -14,9 +14,15 @@ Konnect2 is meant to be a more or less drop in replacement for connect2, but wri
 Once connected, the following internal commands are available:
 
 ~~ to send a ~
+
 ~h internal help message
+
 ~o run an OSSI script (ONLY for use in Avaya SAT)
+
 ~r enable writing logfile on localhost
+
 ~s disable logfile
+
 ~q to quit
+
 ~x to run a local shell
