@@ -21,7 +21,6 @@
 # 07/31/2013	: sort listing of ossi scripts as displayed to user
 # 07/24/2013	: mostly re-written, resulting in significant speed
 # 		  improvements, 0m1.146s vs. 0m6.975s
-# 09/23/2010	: ported to Citi environment
 # 03/04/2008	: baselined re-write of Avaya connect2 functionality
 #
 # TODO		: Make the following procs
@@ -120,7 +119,7 @@ proc lab_auth {} {
 	
 	global login
 	set timeout -1
-	set list {admin craft labadmin local master root js34528}
+	set list {admin craft labadmin local master root}
 
 	if { [lsearch $list $login] != -1 } {
 		if {$login == "admin"} {
@@ -131,9 +130,6 @@ proc lab_auth {} {
 			return "$pass\r"
 		} elseif { $login == "root"} {
 			set pass root01
-			return "$pass\r"
-		} elseif { $login == "js34528"} {
-			set pass p4ssw0rD
 			return "$pass\r"
 		} else { 
 			set pass Labadmin01 
