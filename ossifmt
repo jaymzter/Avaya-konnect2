@@ -249,18 +249,6 @@ case "$CMD" in
 first)		first $ARGS;exit 0;;
 esac
 
-# The nawk script that follows pastes OSSI output lines of the same type
-# together into one looooong line. Because some OSSI commands
-# (e.g. "disp sys wireless") spit back several hundred fields, this script
-# can produce single lines with several hundred fields. Downstream, a nawk
-# script that tries to chew on one of those long lines will choke and
-# spit out an error message. There are two possible solutions to this problem:
-# 1) limit output lines to a reasonable (e.g. 100) number of fields, or
-# 2) rewrite this entire program to not expect all the fields IDs on one
-# line. I've chosen to implement the former, as evidenced by the NFIELDS
-# hack below.
-#	Dennis Sanger  4/18/2001
-
 gawk '
 # The tilde (~) operator allows you to test a regular expression against a
 # field. Here $1 is first field
