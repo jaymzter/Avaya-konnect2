@@ -110,38 +110,6 @@ global argv0
 
 ############################################################################
 #
-#  Name    : lab_auth
-#  Purpose : special checks for lab environment
-#  Notes   : 
-#
-############################################################################
-proc lab_auth {} {
-	
-	global login
-	set timeout -1
-	set list {admin craft labadmin local master root}
-
-	if { [lsearch $list $login] != -1 } {
-		if {$login == "admin"} {
-			set pass admin
-			return "$pass\r"
-		} elseif { $login == "craft"} {
-			set pass craft01
-			return "$pass\r"
-		} elseif { $login == "root"} {
-			set pass root01
-			return "$pass\r"
-		} else { 
-			set pass Labadmin01 
-			return "$pass\r"
-			} 
-	} else {
-		user_auth
-		}
-}
-
-############################################################################
-#
 #  Name    : user_auth
 #  Purpose : collect password
 #  Notes   : 
@@ -231,7 +199,7 @@ if  ![file exists $runcmd] {
 
 send -- "newterm\r"
 expect -exact "\]"
-send -- "ossi\r"
+send -- "ossin\r"
 expect -exact "t"
 log_file -a -noappend $logfilename
 
@@ -319,7 +287,7 @@ proc batch_session {} {
 			exp_continue
 			}
 		-re "513\] " {
-			send -- "ossi\r"
+			send -- "ossin\r"
 			log_file -a -noappend $logfilename
 			exp_continue
 			}
@@ -481,36 +449,19 @@ proc main_session {} {
 
 }
 
-############################################################################
-#
-#  Name    : labchk
-#  Purpose : set auth based on whether we're using static passwords or not
-#  Notes   : 
-#  TODO	   : 
-#
-############################################################################
-proc labchk {} {
-global lab
-                if {$lab == 0} {
-                set ::pass [lab_auth]
-                        } else {
-                set ::pass [user_auth]
-                        }
-}
-
 #----------------------------------------------------------------------------- 
 # main
 #----------------------------------------------------------------------------- 
 # set your environment
-set lab 0
+exp_internal 0 # 1 for debugging
 set prompt "(%|#|>|\=\>|\\\$)"
 
 syntax
 switch -regexp -- $argv {
-	script {
+	batch {
 		set login [lindex $argv 1]
 		set host [lindex $argv 2]
-		labchk
+		set pass [user_auth]
 		if {$argc == 5} {
 			set port [lindex $argv 4]
 			} else {
@@ -519,11 +470,7 @@ switch -regexp -- $argv {
 		batch_session
 		exit
 	}
-	sep {
-		fmt
-		exit
-	}
-	raw {
+	(raw|sep) {
 		fmt
 		exit
 	}
@@ -531,12 +478,12 @@ switch -regexp -- $argv {
 		set login [lindex $argv 0]
 		set host [lindex $argv 1]
 		set port 5022
-		labchk
+		set pass [user_auth]
 		main_session
 	} default {
 		set login [lindex $argv 0]
 		set host [lindex $argv 1]
-		labchk
+		set pass [user_auth]
 		set port 22
 		main_session
 	}
