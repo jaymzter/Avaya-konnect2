@@ -145,7 +145,7 @@ display events                                                  Page   1 of   1
                               Event Type:      
                                Extension:             
 ```
-Knowing how the form looks in the SAT, you can tie the FIDs to the correct fields. With th information above it is trivial to create an ossi script to retrieve Denial Events. 
+Knowing how the form looks in the SAT, you can tie the FIDs to the correct fields. With the information above it is trivial to create an ossi script to retrieve Denial Events. 
 ```
 cdisp eve
 000bff00        0010ff00
