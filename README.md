@@ -3,7 +3,7 @@ A lightweigh emulator of Avaya's connect2 program
 
 Connect2 is a Unix based command line tool used by Avaya Tier 3 engineers and Tier 4 developers. It automatically connects to an Avaya PBX and logs the user in, handling any ASG challenges. It also lets you run OSSI scripts and collect MST traces. It was originally written in the C language to run on the Solaris operating system.
 
-Konnect2 is meant to be a more or less drop in replacement for connect2, but written in the Expect programming language. It runs anywhere expect runs, most notably Linux and on Windows using the Cygwin sublayer. Currently konnect2 provides the following features when connected to an Avaya S8x00 server:
+Konnect2 is meant to be a more or less drop in replacement for connect2, but written in the Expect programming language using a "clean room" or "Chinese wall" approach (i.e. not based on or referencing any actual connect2 code). It runs anywhere expect runs, most notably Linux and on Windows using the Cygwin sublayer. Currently konnect2 provides the following features when connected to an Avaya S8x00 server:
 
 1. Automatically connect and log in to the PBX using SSH
 2. Once logged in you can run OSSI scripts straight from the SAT terminal. Konnect2 will activate the Avaya OSSI interface, run your script and write the results to a local file for analysis later
