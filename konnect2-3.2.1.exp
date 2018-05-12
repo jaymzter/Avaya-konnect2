@@ -4,30 +4,9 @@
 #
 # Name		: konnect2
 # Purpose	: lightweight connect2 emulator
-# Notes		: by me, Jamie Sims
-# Changelog	: v3.0.0
-#
-# 07/13/2016	: * automagically run a single ossi script without having to
-# 		    manually log into PBX (batch_session)
-#		  * made ssh login more generic to accomodate batch_session
-#		  * cleaned up argument checking
-#		  * Specify if in lab env so we can decide when to use static
-#		    passwords
-# 02/04/2016	: fmt deprecated, use external ossifmt cmd instead
-# 04/22/2014	: convert format proc to tcl
-# 10/17/2013	: added ASG chall support
-# 08/02/2013	: removed requirement for separate formatting script (proc
-# 		  fmt), bump rev
-# 07/31/2013	: sort listing of ossi scripts as displayed to user
-# 07/24/2013	: mostly re-written, resulting in significant speed
-# 		  improvements, 0m1.146s vs. 0m6.975s
-# 03/04/2008	: baselined re-write of Avaya connect2 functionality
-#
-# TODO		: Make the following procs
-#		    * script open/send
-#		    * ssh connection
-#		 Fix: go into sat, logoff, run ~x, exit bug
-#		      cannot run ossi using init_session
+# Author	: Jamie Sims
+# Changelog	: v3.2.1
+# TODO		: 
 ############################################################################## 
 
 #----------------------------------------------------------------------------- 
@@ -61,18 +40,16 @@ proc disperr {name} {
 USAGE: 
 $name \<username\> \<hostname\> \[-s\]
 or
-$name \[-f\] \[raw\|sep separator\] \<filename\>
+$name fmt \<filename\>
 or
 $name script \<username\> \<hostname\> ossi_script \[port\]
 
 username - username to connect with
 hostname - remote host fqdn or IP addr
--f \[format\] \<filename\> - formats output from a previously run ossi script
-where format is raw or a user-defined separator, such as \"\,\" for CSV output
+fmt \<filename\> - formats output from a previously run ossi script
+where format is tab separated output
 -s - for use when connecting directly to SAT of Avaya CM
-script - directly run an ossi script on \<hostname\>. Defaults to port 5022 or
-optionally specify another \(like 22\), and $name will login to CLI then go to
-SAT
+script - directly run an ossi script on \<hostname\>. Defaults to port 5022
 
 Once connected, the following internal commands are available:
 
@@ -106,6 +83,41 @@ global argv0
         q to quit
         x to run a local shell"
         send "\n"
+}
+
+############################################################################
+#
+#  Name    : lab_auth
+#  Purpose : special checks for lab environment
+#  Notes   : 
+#
+############################################################################
+proc lab_auth {} {
+	
+	global login
+	set timeout -1
+	set list {admin craft root user4 user5}
+
+	if { [lsearch $list $login] != -1 } {
+		if {$login == "admin"} {
+			set pass admin01
+			return "$pass\r"
+		} elseif { $login == "craft"} {
+			set pass craft01
+			return "$pass\r"
+		} elseif { $login == "root"} {
+			set pass root01
+			return "$pass\r"
+		} elseif { $login == "user4"} {
+			set pass p4ssw0rD
+			return "$pass\r"
+		} else { 
+			set pass user5 
+			return "$pass\r"
+			} 
+	} else {
+		user_auth
+		}
 }
 
 ############################################################################
@@ -199,7 +211,7 @@ if  ![file exists $runcmd] {
 
 send -- "newterm\r"
 expect -exact "\]"
-send -- "ossin\r"
+send -- "ossi\r"
 expect -exact "t"
 log_file -a -noappend $logfilename
 
@@ -229,11 +241,11 @@ proc fmt {} {
 	global argv argc
 	set expr {^(d.*)}
 
-	if {$argc == 4} {
-		set sep [lindex $argv 2]
-		set file [lindex $argv 3]
-	} elseif {$argc == 3} {
-			set file [lindex $argv 2]
+	if {$argc == 3} {
+		set sep [lindex $argv 1]
+		set file [lindex $argv 2]
+	} elseif {$argc == 2} {
+			set file [lindex $argv 1]
 		}
 
 	set fp [open $file r ]
@@ -257,52 +269,48 @@ proc fmt {} {
 #  Name    : batch_session
 #  Purpose : execute one off batch cmds from prompt
 #  Notes   : 
-#  TODO	   : specify port 5022 or 22
+#  TODO	   : 
 #
 ############################################################################
 proc batch_session {} {
-	global argv prompt login host port
-	set file [lindex $argv 3]
+	global argv login host port
+	set runcmd [lindex $argv 3]
+	set fbasename [file rootname [file tail $runcmd]]
+	set logfilename $fbasename-[exec date +%F-%H-%M-%S].txt
 
-	if  ![file exists $file] {
+	if  ![file exists $runcmd] {
 		send_user "Sorry: Script not found or doesn't exist\n"
 		exit 1
 		}
 
- 	set fp [open $file r ]
-	set file_data [read $fp]
-	set logfilename script-[exec date +%F-%H-%M-%S].txt
-
 	set timeout -1
-#	log_user 0
+	log_user 0
 	set session_id [init_session $login $host $port]
 	set spawn_id $session_id
 	expect {
-		-re "terminal type" {
-			send -- "vt100\r"
-			exp_continue
-			}
-		-re $login {
-			send -- "autosat\r"
-			exp_continue
-			}
-		-re "513\] " {
-			send -- "ossin\r"
+		-re "ommand: " {
+			send -- "newterm\r"
+			expect -re "\] "
+			send -- "ossi\r"
+			expect -exact "t" {
 			log_file -a -noappend $logfilename
-			exp_continue
+			set file [open $runcmd "r"]
+			while {[ gets $file line ] != -1} {
+			send -- "$line\r"
+				}
+			close $file
 			}
-		-re "ossi" {
-			send -- "$file_data\r"
+			expect -exact "t" {
+			send -- "clogoff\rt\r"
+				}
 			}
 		}
 
-	expect -exact "t"
-	send -- "clogoff\rt\r"
 	expect {
 		-re "n\]" {
 			send -- "y\r"
 			}
-		-re "$prompt" {
+		-re "$login" {
 			send -- "exit\r"
 			}
 		}
@@ -318,58 +326,68 @@ proc batch_session {} {
 # Let ssh supply the error msgs.  if for some reason there's a need to proxy
 # the msg, then do something like this:
 # set err $expect_out(buffer)
-# send_error "$err ([lindex [split $remote '@'] 1])\n
+# send_error "$err ([lindex [split $remote '@'] 1])\n"
 #
 ############################################################################
 proc init_session {login host port} {
-global prompt ::pass
+global prompt lab
 set remote [format "%s@%s" "$login" "$host"]
+set sshopts "-o StrictHostKeyChecking=no"
+#.set sshopts "--hostkey-policy=advisory"
 match_max 100000
-spawn -noecho ssh -o StrictHostKeyChecking=no -p $port $remote
+
+spawn -noecho ssh $sshopts -p $port $remote
 set session_id $spawn_id
-set timeout 20
+set timeout 5
 
 	expect {
 		eof {
-			send_error "Connection was unexpectedly closed\n"
+			send_error "Connection to $host was unexpectedly closed\n"
 			exit
 		}
 		timeout {
-			send_error "Connection timed out\n"
+			send_error "Connection to $host timed out\n"
 			exit
 		}
+		-glob "Connection to * closed." {
+			send_error "Connection to $host has spontaneously closed.\n"
+			exit
+			}
+		-glob "*denied*" {
+			send_error "Password not accepted.\n"
+			return 10
+			}
 		-re "assword: " {
-			if {$::pass == ""} {
-				set password [user_auth]
-				}
-			send -- "$::pass"
-			return $session_id
+			if {$lab == 0} {
+               			 set pass [lab_auth]
+		                        } else {
+       			         set pass [user_auth]
+                       		 }
+			send -- "$pass"
 				}
 		-re "Response: " {
-			set password [user_auth]
-			send -- "$::pass\r"
-				expect {
-					-re "assword: " {
-						send_error "automagic authentication failed, wrong password\n"
-						exit 10
-						}
-					-re "513\] " {
-						send -- "w2ktt\r"
-						return $session_id
-						}
-					-re $prompt {
-						return $session_id
-						}
-					-glob "Connection to * closed." {
-						send_error "Connection to $host has spontaneously closed.\n"
-						exit 9
-						}
-					-glob "*denied*" {
-						send_error "Password not accepted.\n"
-						return 10
-						}
-					}
+			set pass [user_auth]
+			send -- "$pass"
 				}
+		}
+
+	expect {
+		-glob "*Received disconnect*" {
+			send_error "Connection to $host has spontaneously closed.\n"
+			exit
+			}
+		-re "assword: " {
+			send_error "automagic authentication failed, wrong password\n"
+			exit
+			}
+		-re $prompt {
+			send -- "\r"
+			return $session_id
+			}
+		-re "513\] " {
+			send -- "w2ktt\r"
+			return $session_id
+			}
 		}
 }
 
@@ -378,8 +396,7 @@ set timeout 20
 #  Name    : main_session
 #  Purpose : main execution loop
 #  Notes   : 
-#  TODO	   : run ~r, run ~o and just hit return. Run ~o again. >crash!<
-#	     b/c we enable log_file twice, which is a no-no
+#  TODO	   : 
 #
 ############################################################################
 proc main_session {} {
@@ -389,19 +406,10 @@ proc main_session {} {
 	if { $port == 5022 } {
 		set is_sat 1
 		} else {
-			set is_sat ""
+			set is_sat 0
 			}
 	set ssh [init_session $login $host $port]
         set spawn_id $ssh
-
-	expect {
-		-re $prompt {
-			send -- "vt100\r"
-			}
-		-re "513\] " {
-			send -- "w2ktt\r"
-			}
-		}
 
 	interact {
 		-re "~~" {
@@ -411,11 +419,19 @@ proc main_session {} {
 			interact_help
 			}
 		"~x" {
-			spawn -noecho $::env(SHELL)
-			interact 
-			if { $is_sat == 1 } {
-				w2ktt_scrn $ssh
+			set shell [spawn -noecho $::env(SHELL)]
+			send "\n"
+			interact eof
+			set spawn_id $ssh
+			remove_nulls 0
+			expect {
+				null { 
+					if { $is_sat == 1 } {
+						w2ktt_scrn $ssh
+						} else { send "clear\n" }
+					}
 				}
+			remove_nulls 1
 			}
 		"~q" {
 			set suspend 1
@@ -435,9 +451,45 @@ proc main_session {} {
 		"~o" {
 			ossi $ssh
 			}
-		-echo "w2ktt" {
-				send "w2ktt\r"
-				set is_sat 1
+		-nobuffer "w2ktt" {
+			set is_sat 1
+			}
+		-nobuffer "logoff" {
+			set is_sat 0
+			}
+# Translate standard xterm F keys to w2ktt mappings. This way we don't have
+# to make global changes to .Xdefaults or .Xresources
+		"\033OP" {
+			#. F1 Cancel
+			send "\033x\r"
+			}
+		"\033OQ" {
+			#. F2 Refresh
+			send "\033r\r"
+			}
+		"\033OR" {
+			#. F3 Enter
+			send "\033e\r"
+			}
+		"\033OS" {
+			#. F4 Clear Field
+			send "\033c\r"
+			}
+		"\033\[15~" {
+			#. F5 Help
+			send "\033h\r"
+			}
+		"\033\[17~" {
+			#. F6 Go To Page
+			send "\033dp\r"
+			}
+		"\033\[18~" {
+			#. F7 Next Page
+			send "\033n\r"
+			}
+		"\033\[19~" {
+			#. F8 Previous Page
+			send "\033p\r"
 			}
 		}
 
@@ -452,16 +504,18 @@ proc main_session {} {
 #----------------------------------------------------------------------------- 
 # main
 #----------------------------------------------------------------------------- 
-# set your environment
 exp_internal 0 # 1 for debugging
+# set your environment
+set lab 0
 set prompt "(%|#|>|\=\>|\\\$)"
+set login [lindex $argv 0]
+set host [lindex $argv 1]
 
 syntax
 switch -regexp -- $argv {
-	batch {
+	script {
 		set login [lindex $argv 1]
 		set host [lindex $argv 2]
-		set pass [user_auth]
 		if {$argc == 5} {
 			set port [lindex $argv 4]
 			} else {
@@ -470,20 +524,16 @@ switch -regexp -- $argv {
 		batch_session
 		exit
 	}
-	(raw|sep) {
+
+	fmt {
 		fmt
 		exit
 	}
+
 	\-s {
-		set login [lindex $argv 0]
-		set host [lindex $argv 1]
 		set port 5022
-		set pass [user_auth]
 		main_session
 	} default {
-		set login [lindex $argv 0]
-		set host [lindex $argv 1]
-		set pass [user_auth]
 		set port 22
 		main_session
 	}
